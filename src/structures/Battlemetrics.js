@@ -21,7 +21,8 @@
 const Axios = require('axios');
 
 const Client = require('../../index.ts');
-const RandomUsernames = require('../util/RandomUsernames.json');
+const RandomUsernames = require('../staticFiles/RandomUsernames.json');
+const Utils = require = require('../util/utils.js');
 
 const SERVER_LOG_SIZE = 1000;
 const CONNECTION_LOG_SIZE = 1000;
@@ -56,6 +57,9 @@ class Battlemetrics {
         this._logoutPlayers = [];       /* Players that just logged out, updates every evaluation call. (id) */
         this._nameChangedPlayers = [];  /* Players that changed name, updates every evaluation call({id, from, to}) */
         this._onlinePlayers = [];       /* Players that are online, updates every evaluation call. (id) */
+        this._offlinePlayers = [];      /* Player that are offline, updates every evaluation call. (id) */
+
+        this._serverEvaluation = new Object();
 
         /* Init API parameter variables */
 
@@ -145,6 +149,10 @@ class Battlemetrics {
     set nameChangedPlayers(nameChangedPlayers) { this._nameChangedPlayers = nameChangedPlayers; }
     get onlinePlayers() { return this._onlinePlayers; }
     set onlinePlayers(onlinePlayers) { this._onlinePlayers = onlinePlayers; }
+    get offlinePlayers() { return this._offlinePlayers; }
+    set offlinePlayers(offlinePlayers) { this._offlinePlayers = offlinePlayers; }
+    get serverEvaluation() { return this._serverEvaluation; }
+    set serverEvaluation(serverEvaluation) { this._serverEvaluation = serverEvaluation; }
 
     /**
      *  Construct the Battlemetrics API call for searching servers by name.
@@ -162,6 +170,15 @@ class Battlemetrics {
      */
     GET_SERVER_DATA_API_CALL(id) {
         return `https://api.battlemetrics.com/servers/${id}?include=player`;
+    }
+
+    /**
+     *  Construct the Battlemetrics API call for getting profile data.
+     *  @param {number} id The id of the player.
+     *  @return {string} The Battlemetrics API call string.
+     */
+    GET_PROFILE_DATA_API_CALL(id) {
+        return `https://api.battlemetrics.com/players/${id}?include=identifier`;
     }
 
     /**
@@ -222,7 +239,7 @@ class Battlemetrics {
 
             const player = new Object();
             player['id'] = entity.id;
-            player['name'] = entity.attributes.name;
+            player['name'] = Utils.removeInvisibleCharacters(entity.attributes.name);
             player['time'] = entity.attributes.value;
             player['rank'] = entity.attributes.rank;
             player['url'] = this.GET_BATTLEMETRICS_PLAYER_URL(entity.id);
@@ -232,6 +249,31 @@ class Battlemetrics {
 
         if (data.hasOwnProperty('links') && data['links'].hasOwnProperty('next')) {
             parsed['next'] = data.links.next;
+        }
+
+        return parsed;
+    }
+
+    /**
+     *  Parse the data from a profile data api call.
+     *  @param {object} data The data to be parsed.
+     *  @return {object} The parsed data object.
+     */
+    #parseProfileDataApiResponse(data) {
+        const parsed = [];
+
+        for (const name of data.included) {
+            if (name.type !== 'identifier') continue;
+            if (!name.hasOwnProperty('attributes')) continue;
+            if (!name['attributes'].hasOwnProperty('type')) continue;
+            if (name['attributes']['type'] !== 'name') continue;
+            if (!name['attributes'].hasOwnProperty('identifier')) continue;
+            if (!name['attributes'].hasOwnProperty('lastSeen')) continue;
+
+            parsed.push({
+                'name': name['attributes']['identifier'],
+                'lastSeen': name['attributes']['lastSeen']
+            });
         }
 
         return parsed;
@@ -314,7 +356,7 @@ class Battlemetrics {
     /**
      *  Format the time from timestamp to now [seconds,HH:MM].
      *  @param {string} timestamp The timestamp from before.
-     *  @return {Array|null} index 0: seconds, index 1: The formatted time, null if invalid.
+     *  @return {Array} index 0: seconds, index 1: The formatted time, null if invalid.
      */
     #formatTime(timestamp) {
         const date = new Date(timestamp);
@@ -395,6 +437,7 @@ class Battlemetrics {
      *  @return {number|null} The id of the server.
      */
     async getServerIdFromName(name) {
+        const originalName = name;
         name = encodeURI(name).replace('\#', '\*');
         const search = this.SEARCH_SERVER_NAME_API_CALL(name);
         const response = await this.#request(search);
@@ -405,7 +448,26 @@ class Battlemetrics {
             return null;
         }
 
-        return response.data.data[0].attributes.id;
+        /* Find the correct server. */
+        for (const server of response.data.data) {
+            if (server.attributes.name === originalName) {
+                return server.id;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     *  Get the profile data of a player.
+     *  @param {id} id The id of the player.
+     *  @return {object|null} The profile data object of the player.
+     */
+    async getProfileData(playerId) {
+        const data = await this.request(this.GET_PROFILE_DATA_API_CALL(playerId));
+        if (!data) return [];
+
+        return this.#parseProfileDataApiResponse(data);
     }
 
     /**
@@ -508,11 +570,15 @@ class Battlemetrics {
         this.nameChangedPlayers = [];
         const prevOnlinePlayers = this.onlinePlayers;
         this.onlinePlayers = [];
+        this.offlinePlayers = [];
 
         const included = data.included;
         for (const entity of included) {
             if (entity.type !== 'player') continue;
-            if (!RandomUsernames.RandomUsernames.includes(entity.attributes.name)) this.streamerMode = false;
+
+            const name = Utils.removeInvisibleCharacters(entity.attributes.name);
+
+            if (!RandomUsernames.RandomUsernames.includes(name)) this.streamerMode = false;
 
             /**
              * Attributes description from Battlemetrics API Documentation
@@ -534,13 +600,13 @@ class Battlemetrics {
 
                 /* From Battlemetrics */
                 this.players[entity.id]['id'] = entity.id;
-                this.players[entity.id]['name'] = entity.attributes.name;
+                this.players[entity.id]['name'] = name;
                 this.players[entity.id]['private'] = entity.attributes.private;
                 this.players[entity.id]['positiveMatch'] = entity.attributes.positiveMatch;
                 this.players[entity.id]['createdAt'] = entity.attributes.createdAt;
                 this.players[entity.id]['updatedAt'] = entity.attributes.updatedAt;
-                const firstTime = entity.meta.metadata.find(e => e.key === 'firstTime');
-                if (firstTime) this.players[entity.id]['firstTime'] = firstTime.value;
+                const firstTimeVar = entity.meta.metadata.find(e => e.key === 'firstTime');
+                if (firstTimeVar) this.players[entity.id]['firstTime'] = firstTimeVar.value;
 
                 /* Other */
                 this.players[entity.id]['url'] = this.GET_BATTLEMETRICS_PLAYER_URL(entity.id);
@@ -549,23 +615,25 @@ class Battlemetrics {
                 this.players[entity.id]['connectionLog'] = [];
                 this.players[entity.id]['logoutDate'] = null;
 
+                if (!firstTime) this.#updateConnectionLog(entity.id, { type: 0, time: time }); /* 0 = Login event */
+
                 this.newPlayers.push(entity.id);
             }
             else {  /* Existing Player */
                 /* From Battlemetrics */
                 this.players[entity.id]['id'] = entity.id;
-                if (this.players[entity.id]['name'] !== entity.attributes.name) {
+                if (this.players[entity.id]['name'] !== name) {
                     this.nameChangedPlayers.push({
                         id: entity.id,
                         from: this.players[entity.id]['name'],
-                        to: entity.attributes.name
+                        to: name
                     });
                     this.#updateNameChangeHistory(entity.id, {
                         from: this.players[entity.id]['name'],
-                        to: entity.attributes.name,
+                        to: name,
                         time: time
                     });
-                    this.players[entity.id]['name'] = entity.attributes.name;
+                    this.players[entity.id]['name'] = name;
                 }
                 this.players[entity.id]['private'] = entity.attributes.private;
                 this.players[entity.id]['positiveMatch'] = entity.attributes.positiveMatch;
@@ -591,6 +659,10 @@ class Battlemetrics {
             this.players[id]['logoutDate'] = time;
             this.#updateConnectionLog(id, { type: 1, time: time }); /* 1 = Logout event */
             this.logoutPlayers.push(id);
+        }
+
+        for (const [playerId, content] of Object.entries(this.players)) {
+            if (content['status'] === false) this.offlinePlayers.push(playerId);
         }
 
         this.update(data);
@@ -672,7 +744,7 @@ class Battlemetrics {
     }
 
     /**
-     *  Get the online time from a player.
+     *  Get the online time of a player.
      *  @param {string} playerId The id of the player to get online time from.
      *  @return {Array} index 0: seconds online, index 1: The formatted online time of a player.
      */
@@ -686,6 +758,20 @@ class Battlemetrics {
     }
 
     /**
+     *  Get the offline time of a player.
+     *  @param {string} playerId The id of the player to get offline time from.
+     *  @return {Array} index 0: seconds offline, index 1: The formatted offline time of a player.
+     */
+    getOfflineTime(playerId) {
+        if (!this.lastUpdateSuccessful || !this.players.hasOwnProperty(playerId) ||
+            !this.players[playerId]['logoutDate']) {
+            return null;
+        }
+
+        return this.#formatTime(this.players[playerId]['logoutDate']);
+    }
+
+    /**
      *  Get an array of online players ordered by time played.
      *  @return {Array} An array of online players ordered by time played.
      */
@@ -696,6 +782,20 @@ class Battlemetrics {
             unordered.push([seconds !== null ? seconds[0] : 0, playerId]);
         }
         let ordered = unordered.sort(function (a, b) { return b[0] - a[0] })
+        return ordered.map(e => e[1]);
+    }
+
+    /**
+     *  Get an array of offline players ordered by least time since online.
+     *  @return {Array} An array of online players ordered by least time since online.
+     */
+    getOfflinePlayerIdsOrderedByLeastTimeSinceOnline() {
+        const unordered = [];
+        for (const playerId of this.offlinePlayers) {
+            const seconds = this.#formatTime(this.players[playerId]['logoutDate']);
+            unordered.push([seconds !== null ? seconds[0] : 0, playerId]);
+        }
+        let ordered = unordered.sort(function (a, b) { return a[0] - b[0] })
         return ordered.map(e => e[1]);
     }
 

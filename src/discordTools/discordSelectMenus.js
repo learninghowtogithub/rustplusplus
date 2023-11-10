@@ -23,6 +23,7 @@ const Fs = require('fs');
 const Path = require('path');
 
 const Client = require('../../index.ts');
+const Constants = require('../util/constants.js');
 const Languages = require('../util/languages.js');
 
 module.exports = {
@@ -31,7 +32,12 @@ module.exports = {
 
         if (options.hasOwnProperty('customId')) selectMenu.setCustomId(options.customId);
         if (options.hasOwnProperty('placeholder')) selectMenu.setPlaceholder(options.placeholder);
-        if (options.hasOwnProperty('options')) selectMenu.setOptions(options.options);
+        if (options.hasOwnProperty('options')) {
+            for (const option of options.options) {
+                option.description = option.description.substring(0, Constants.SELECT_MENU_MAX_DESCRIPTION_CHARACTERS);
+            }
+            selectMenu.setOptions(options.options);
+        }
         if (options.hasOwnProperty('disabled')) selectMenu.setDisabled(options.disabled);
 
         return selectMenu;
@@ -226,6 +232,8 @@ module.exports = {
         const autoOff = Client.client.intlGet(guildId, 'autoOffCap');
         const autoOnProximity = Client.client.intlGet(guildId, 'autoOnProximityCap');
         const autoOffProximity = Client.client.intlGet(guildId, 'autoOffProximityCap');
+        const autoOnAnyOnline = Client.client.intlGet(guildId, 'autoOnAnyOnlineCap');
+        const autoOffAnyOnline = Client.client.intlGet(guildId, 'autoOffAnyOnlineCap');
 
         let autoDayNightOnOffString = autoSetting;
         if (entity.autoDayNightOnOff === 0) autoDayNightOnOffString += off;
@@ -235,6 +243,8 @@ module.exports = {
         else if (entity.autoDayNightOnOff === 4) autoDayNightOnOffString += autoOff;
         else if (entity.autoDayNightOnOff === 5) autoDayNightOnOffString += autoOnProximity;
         else if (entity.autoDayNightOnOff === 6) autoDayNightOnOffString += autoOffProximity;
+        else if (entity.autoDayNightOnOff === 7) autoDayNightOnOffString += autoOnAnyOnline;
+        else if (entity.autoDayNightOnOff === 8) autoDayNightOnOffString += autoOffAnyOnline;
 
         return new Discord.ActionRowBuilder().addComponents(
             module.exports.getSelectMenu({
@@ -275,6 +285,16 @@ module.exports = {
                         label: autoOffProximity,
                         description: Client.client.intlGet(guildId, 'smartSwitchAutoOffProximity'),
                         value: '6'
+                    },
+                    {
+                        label: autoOnAnyOnline,
+                        description: Client.client.intlGet(guildId, 'smartSwitchAutoOnAnyOnline'),
+                        value: '7'
+                    },
+                    {
+                        label: autoOffAnyOnline,
+                        description: Client.client.intlGet(guildId, 'smartSwitchAutoOffAnyOnline'),
+                        value: '8'
                     }]
             }));
     },

@@ -30,6 +30,7 @@ const DiscordEmbeds = require('../discordTools/discordEmbeds');
 const DiscordMessages = require('../discordTools/discordMessages.js');
 const DiscordVoice = require('../discordTools/discordVoice.js');
 const DiscordTools = require('../discordTools/discordTools.js');
+const InGameChatHandler = require('../handlers/inGameChatHandler.js');
 const InstanceUtils = require('../util/instanceUtils.js');
 const Languages = require('../util/languages.js');
 const Logger = require('./Logger.js');
@@ -75,6 +76,10 @@ class RustPlus extends RustPlusLib {
         this.smartAlarmIntervalCounter = 20;        /* Counter to decide when smart alarms should be updated */
         this.interactionSwitches = [];              /* Stores the ids of smart switches that are interacted in-game. */
 
+        /* Chat handler variables */
+        this.inGameChatQueue = [];
+        this.inGameChatTimeout = null;
+
         /* Stores found vending machine items that are subscribed to */
         this.foundSubscriptionItems = { all: [], buy: [], sell: [] };
 
@@ -102,26 +107,6 @@ class RustPlus extends RustPlusLib {
         this.time = null;           /* Stores the Time structure. */
         this.team = null;           /* Stores the Team structure. */
         this.mapMarkers = null;     /* Stores the MapMarkers structure. */
-
-        /* Retrieve the trademark string */
-        const instance = Client.client.getInstance(guildId);
-        const trademark = instance.generalSettings.trademark;
-        this.trademarkString = (trademark === 'NOT SHOWING') ? '' : `${trademark} | `;
-
-        /* Modify sendTeamMessageAsync function to allow trademark and splitting messages. */
-        this.oldSendTeamMessageAsync = this.sendTeamMessageAsync;
-        this.sendTeamMessageAsync = async function (message) {
-            const messageMaxLength = Constants.MAX_LENGTH_TEAM_MESSAGE - this.trademarkString.length;
-            const strings = message.match(new RegExp(`.{1,${messageMaxLength}}(\\s|$)`, 'g'));
-
-            if (this.team === null || this.team.allOffline) return;
-
-            for (const msg of strings) {
-                if (!this.generalSettings.muteInGameBotMessages) {
-                    await this.oldSendTeamMessageAsync(`${this.trademarkString}${msg}`);
-                }
-            }
-        }
 
         this.loadRustPlusEvents();
     }
@@ -278,41 +263,8 @@ class RustPlus extends RustPlusLib {
         this.log(Client.client.intlGet(null, 'infoCap'), Client.client.intlGet(null, `logInGameCommand`, args));
     }
 
-    async printCommandOutput(str, type = 'COMMAND') {
-        if (str === null) return;
-
-        if (this.generalSettings.commandDelay === '0') {
-            if (Array.isArray(str)) {
-                for (const string of str) {
-                    await this.sendTeamMessageAsync(string);
-                }
-            }
-            else {
-                await this.sendTeamMessageAsync(str);
-            }
-        }
-        else {
-            const self = this;
-            setTimeout(function () {
-                if (Array.isArray(str)) {
-                    for (const string of str) {
-                        self.sendTeamMessageAsync(string);
-                    }
-                }
-                else {
-                    self.sendTeamMessageAsync(str);
-                }
-            }, parseInt(this.generalSettings.commandDelay) * 1000)
-
-        }
-        if (Array.isArray(str)) {
-            for (const string of str) {
-                this.log(type, string);
-            }
-        }
-        else {
-            this.log(type, str);
-        }
+    sendInGameMessage(message) {
+        InGameChatHandler.inGameChatHandler(this, Client.client, message);
     }
 
     async sendEvent(setting, text, event, embed_color, firstPoll = false, image = null) {
@@ -324,7 +276,7 @@ class RustPlus extends RustPlusLib {
             await DiscordMessages.sendDiscordEventMessage(this.guildId, this.serverId, text, img, embed_color);
         }
         if (!firstPoll && setting.inGame) {
-            await this.sendTeamMessageAsync(`${text}`);
+            await this.sendInGameMessage(`${text}`);
         }
         if (!firstPoll && setting.voice) {
             await DiscordVoice.sendDiscordVoiceMessage(this.guildId, text);
@@ -944,6 +896,72 @@ class RustPlus extends RustPlusLib {
         }
 
         return null;
+    }
+
+    getCommandCraft(command) {
+        const prefix = this.generalSettings.prefix;
+        const commandCraft = `${prefix}${Client.client.intlGet(this.guildId, 'commandSyntaxCraft')}`;
+        const commandCraftEn = `${prefix}${Client.client.intlGet('en', 'commandSyntaxCraft')}`;
+
+        if (command.toLowerCase().startsWith(`${commandCraft} `)) {
+            command = command.slice(`${commandCraft} `.length).trim();
+        }
+        else {
+            command = command.slice(`${commandCraftEn} `.length).trim();
+        }
+
+        const words = command.split(' ');
+        const lastWord = words[words.length - 1];
+        const lastWordLength = lastWord.length;
+        const restString = command.slice(0, -(lastWordLength)).trim();
+
+        let itemSearchName = null, itemSearchQuantity = null;
+        if (isNaN(lastWord)) {
+            itemSearchName = command;
+            itemSearchQuantity = 1;
+        }
+        else {
+            itemSearchName = restString;
+            itemSearchQuantity = parseInt(lastWord);
+        }
+
+        const item = Client.client.items.getClosestItemIdByName(itemSearchName)
+        if (item === undefined || itemSearchName === '') {
+            const str = Client.client.intlGet(this.guildId, 'noItemWithNameFound', {
+                name: itemSearchName
+            });
+            return str;
+        }
+
+        const itemId = item;
+        const itemName = Client.client.items.getName(itemId);
+        const quantity = itemSearchQuantity;
+
+        const craftDetails = Client.client.rustlabs.getCraftDetailsById(itemId);
+        if (craftDetails === null) {
+            const str = Client.client.intlGet(this.guildId, 'couldNotFindCraftDetails', {
+                name: itemName
+            });
+            return str;
+        }
+
+        let str = `${itemName} `;
+        if (quantity === 1) {
+            str += `(${craftDetails[2].timeString}): `;
+        }
+        else {
+            const time = Timer.secondsToFullScale(craftDetails[2].time * quantity, '', true);
+            str += `x${quantity} (${time}): `;
+        }
+
+        for (const ingredient of craftDetails[2].ingredients) {
+            const ingredientName = Client.client.items.getName(ingredient.id);
+            str += `${ingredientName} x${ingredient.quantity * quantity}, `;
+        }
+
+        str = str.slice(0, -2);
+
+        return str;
     }
 
     async getCommandDeath(command, callerSteamId) {
@@ -2009,6 +2027,117 @@ class RustPlus extends RustPlusLib {
         });
     }
 
+    getCommandRecycle(command) {
+        const prefix = this.generalSettings.prefix;
+        const commandRecycle = `${prefix}${Client.client.intlGet(this.guildId, 'commandSyntaxRecycle')}`;
+        const commandRecycleEn = `${prefix}${Client.client.intlGet('en', 'commandSyntaxRecycle')}`;
+
+        if (command.toLowerCase().startsWith(`${commandRecycle} `)) {
+            command = command.slice(`${commandRecycle} `.length).trim();
+        }
+        else {
+            command = command.slice(`${commandRecycleEn} `.length).trim();
+        }
+
+        const words = command.split(' ');
+        const lastWord = words[words.length - 1];
+        const lastWordLength = lastWord.length;
+        const restString = command.slice(0, -(lastWordLength)).trim();
+
+        let itemSearchName = null, itemSearchQuantity = null;
+        if (isNaN(lastWord)) {
+            itemSearchName = command;
+            itemSearchQuantity = 1;
+        }
+        else {
+            itemSearchName = restString;
+            itemSearchQuantity = parseInt(lastWord);
+        }
+
+        const item = Client.client.items.getClosestItemIdByName(itemSearchName)
+        if (item === undefined || itemSearchName === '') {
+            const str = Client.client.intlGet(this.guildId, 'noItemWithNameFound', {
+                name: itemSearchName
+            });
+            return str;
+        }
+
+        const itemId = item;
+        const itemName = Client.client.items.getName(itemId);
+        const quantity = itemSearchQuantity;
+
+        const recycleDetails = Client.client.rustlabs.getRecycleDetailsById(itemId);
+        if (recycleDetails === null) {
+            const str = Client.client.intlGet(this.guildId, 'couldNotFindRecycleDetails', {
+                name: itemName
+            });
+            return str;
+        }
+
+        const recycleData = Client.client.rustlabs.getRecycleDataFromArray([
+            { itemId: recycleDetails[0], quantity: quantity, itemIsBlueprint: false }
+        ]);
+
+        let str = `${itemName}: `;
+        for (const item of recycleData) {
+            str += `${Client.client.items.getName(item.itemId)} x${item.quantity}, `;
+        }
+        str = str.slice(0, -2);
+
+        return str;
+    }
+
+    getCommandResearch(command) {
+        const prefix = this.generalSettings.prefix;
+        const commandResearch = `${prefix}${Client.client.intlGet(this.guildId, 'commandSyntaxResearch')}`;
+        const commandResearchEn = `${prefix}${Client.client.intlGet('en', 'commandSyntaxResearch')}`;
+
+        if (command.toLowerCase().startsWith(`${commandResearch} `)) {
+            command = command.slice(`${commandResearch} `.length).trim();
+        }
+        else {
+            command = command.slice(`${commandResearchEn} `.length).trim();
+        }
+        const itemResearchName = command;
+
+        const item = Client.client.items.getClosestItemIdByName(itemResearchName)
+        if (item === undefined || itemResearchName === '') {
+            const str = Client.client.intlGet(this.guildId, 'noItemWithNameFound', {
+                name: itemResearchName
+            });
+            return str;
+        }
+
+        const itemId = item;
+        const itemName = Client.client.items.getName(itemId);
+
+        const researchDetails = Client.client.rustlabs.getResearchDetailsById(itemId);
+        if (researchDetails === null) {
+            const str = Client.client.intlGet(this.guildId, 'couldNotFindResearchDetails', {
+                name: itemName
+            });
+            return str;
+        }
+
+
+
+        let str = `${itemName}: `;
+        if (researchDetails[2].researchTable !== null) {
+            const researchTable = `${Client.client.intlGet(this.guildId, 'researchTable')}`;
+            const scrap = `${researchDetails[2].researchTable}`;
+            str += `${researchTable} (${scrap})`
+        }
+        if (researchDetails[2].workbench !== null) {
+            const type = `${Client.client.items.getName(researchDetails[2].workbench.type)}`;
+            const scrap = researchDetails[2].workbench.scrap;
+            const totalScrap = researchDetails[2].workbench.totalScrap;
+            str += `, ${type} (${scrap} (${totalScrap}))`;
+        }
+        str += '.';
+
+        return str;
+    }
+
     async getCommandSend(command, callerName) {
         const credentials = InstanceUtils.readCredentialsFile(this.guildId);
         const prefix = this.generalSettings.prefix;
@@ -2218,7 +2347,7 @@ class RustPlus extends RustPlusLib {
                 this.timers[id] = {
                     timer: new Timer.timer(
                         () => {
-                            this.printCommandOutput(Client.client.intlGet(this.guildId, 'timer',
+                            this.sendInGameMessage(Client.client.intlGet(this.guildId, 'timer',
                                 { message: message }), 'TIMER');
                             delete this.timers[id]
                         },

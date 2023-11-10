@@ -465,6 +465,22 @@ module.exports = {
         }
     },
 
+    sendUpdateBattlemetricsOnlinePlayersInformationMessage: async function (rustplus, battlemetricsId) {
+        const instance = Client.client.getInstance(rustplus.guildId);
+
+        const content = {
+            embeds: [DiscordEmbeds.getUpdateBattlemetricsOnlinePlayersInformationEmbed(rustplus, battlemetricsId)]
+        }
+
+        const message = await module.exports.sendMessage(rustplus.guildId, content,
+            instance.informationMessageId.battlemetricsPlayers, instance.channelId.information);
+
+        if (message.id !== instance.informationMessageId.battlemetricsPlayers) {
+            instance.informationMessageId.battlemetricsPlayers = message.id;
+            Client.client.setInstance(rustplus.guildId, instance);
+        }
+    },
+
     sendDiscordCommandResponseMessage: async function (rustplus, client, message, response) {
         const content = {
             embeds: [DiscordEmbeds.getDiscordCommandResponseEmbed(rustplus, response)]
@@ -529,5 +545,42 @@ module.exports = {
         }
 
         await Client.client.interactionEditReply(interaction, content);
+    },
+
+    sendCraftMessage: async function (interaction, craftDetails, quantity) {
+        const content = {
+            embeds: [DiscordEmbeds.getCraftEmbed(interaction.guildId, craftDetails, quantity)],
+            ephemeral: true
+        }
+
+        await Client.client.interactionEditReply(interaction, content);
+    },
+
+    sendResearchMessage: async function (interaction, researchDetails) {
+        const content = {
+            embeds: [DiscordEmbeds.getResearchEmbed(interaction.guildId, researchDetails)],
+            ephemeral: true
+        }
+
+        await Client.client.interactionEditReply(interaction, content);
+    },
+
+    sendRecycleMessage: async function (interaction, recycleDetails, quantity) {
+        const content = {
+            embeds: [DiscordEmbeds.getRecycleEmbed(interaction.guildId, recycleDetails, quantity)],
+            ephemeral: true
+        }
+
+        await Client.client.interactionEditReply(interaction, content);
+    },
+
+    sendBattlemetricsEventMessage: async function (guildId, battlemetricsId, title, description, fields = null) {
+        const instance = Client.client.getInstance(guildId);
+
+        const content = {
+            embeds: [DiscordEmbeds.getBattlemetricsEventEmbed(guildId, battlemetricsId, title, description, fields)]
+        }
+
+        await module.exports.sendMessage(guildId, content, null, instance.channelId.activity);
     },
 }

@@ -216,8 +216,8 @@ async function pairingServer(client, guild, full, data, body) {
         steamId: body.playerId,
         playerToken: body.playerToken,
         description: body.desc.replace(/\\n/g, '\n').replace(/\\t/g, '\t'),
-        img: isValidUrl(body.img) ? body.img : Constants.DEFAULT_SERVER_IMG,
-        url: isValidUrl(body.url) ? body.url : Constants.DEFAULT_SERVER_URL,
+        img: isValidUrl(body.img) ? body.img.replace(/ /g, '%20') : Constants.DEFAULT_SERVER_IMG,
+        url: isValidUrl(body.url) ? body.url.replace(/ /g, '%20') : Constants.DEFAULT_SERVER_URL,
         notes: server ? server.notes : {},
         switches: server ? server.switches : {},
         alarms: server ? server.alarms : {},
@@ -463,7 +463,7 @@ async function alarmRaidAlarm(client, guild, full, data, body) {
 
     if (rustplus && (serverId === rustplus.serverId)) {
         await DiscordMessages.sendMessage(guild.id, content, null, instance.channelId.activity);
-        rustplus.sendTeamMessageAsync(`${data.title}: ${data.message}`);
+        rustplus.sendInGameMessage(`${data.title}: ${data.message}`);
     }
 
     client.log(client.intlGet(null, 'infoCap'), `${data.title} ${data.message}`);

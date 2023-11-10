@@ -23,11 +23,17 @@ const DiscordTools = require('../discordTools/discordTools');
 
 module.exports = {
     discordCommandHandler: async function (rustplus, client, message) {
-        const command = message.cleanContent;
+        const guildId = rustplus.guildId;
+        const instance = client.getInstance(guildId);
+
+        let command = message.cleanContent;
+        for (const alias of instance.aliases) {
+            command = command.replace(alias.alias, alias.value);
+        }
+
         const callerName = message.author.username;
         const commandLowerCase = command.toLowerCase();
         const prefix = rustplus.generalSettings.prefix;
-        const guildId = rustplus.guildId;
 
         let response = null;
         if (commandLowerCase === `${prefix}${client.intlGet('en', 'commandSyntaxAfk')}` ||
@@ -51,6 +57,10 @@ module.exports = {
             (commandLowerCase.startsWith(`${prefix}${client.intlGet(guildId, 'commandSyntaxConnection')} `) ||
                 commandLowerCase.startsWith(`${prefix}${client.intlGet(guildId, 'commandSyntaxConnections')}`))) {
             response = rustplus.getCommandConnection(command);
+        }
+        else if (commandLowerCase.startsWith(`${prefix}${client.intlGet('en', 'commandSyntaxCraft')}`) ||
+            commandLowerCase.startsWith(`${prefix}${client.intlGet(guildId, 'commandSyntaxCraft')}`)) {
+            response = rustplus.getCommandCraft(command);
         }
         else if ((commandLowerCase.startsWith(`${prefix}${client.intlGet('en', 'commandSyntaxDeath')} `) ||
             commandLowerCase.startsWith(`${prefix}${client.intlGet('en', 'commandSyntaxDeaths')}`)) ||
@@ -119,6 +129,14 @@ module.exports = {
         else if (commandLowerCase.startsWith(`${prefix}${client.intlGet('en', 'commandSyntaxProx')}`) ||
             commandLowerCase.startsWith(`${prefix}${client.intlGet(guildId, 'commandSyntaxProx')}`)) {
             response = client.intlGet(rustplus.guildId, 'commandNotPossibleDiscord');
+        }
+        else if (commandLowerCase.startsWith(`${prefix}${client.intlGet('en', 'commandSyntaxRecycle')}`) ||
+            commandLowerCase.startsWith(`${prefix}${client.intlGet(guildId, 'commandSyntaxRecycle')}`)) {
+            response = rustplus.getCommandRecycle(command);
+        }
+        else if (commandLowerCase.startsWith(`${prefix}${client.intlGet('en', 'commandSyntaxResearch')}`) ||
+            commandLowerCase.startsWith(`${prefix}${client.intlGet(guildId, 'commandSyntaxResearch')}`)) {
+            response = rustplus.getCommandResearch(command);
         }
         else if (commandLowerCase.startsWith(`${prefix}${client.intlGet('en', 'commandSyntaxSend')} `) ||
             commandLowerCase.startsWith(`${prefix}${client.intlGet(guildId, 'commandSyntaxSend')} `)) {

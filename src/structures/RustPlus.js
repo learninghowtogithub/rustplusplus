@@ -75,6 +75,7 @@ class RustPlus extends RustPlusLib {
         this.smartSwitchIntervalCounter = 10;       /* Counter to decide when smart switches should be updated */
         this.smartAlarmIntervalCounter = 20;        /* Counter to decide when smart alarms should be updated */
         this.interactionSwitches = [];              /* Stores the ids of smart switches that are interacted in-game. */
+        this.messagesSentByBot = [];                /* Stores the last messages sent by the bot to the team chat */
 
         /* Chat handler variables */
         this.inGameChatQueue = [];
@@ -234,6 +235,13 @@ class RustPlus extends RustPlusLib {
             this.events[event].pop();
         }
         this.events[event].unshift(str);
+    }
+
+    updateBotMessages(message) {
+        if (this.messagesSentByBot === Constants.BOT_MESSAGE_HISTORY_LIMIT) {
+            this.messagesSentByBot.pop();
+        }
+        this.messagesSentByBot.unshift(message);
     }
 
     deleteThisRustplusInstance() {
@@ -1157,6 +1165,41 @@ class RustPlus extends RustPlusLib {
         }
     }
 
+    getCommandDespawn(command) {
+        const prefix = this.generalSettings.prefix;
+        const commandDespawn = `${prefix}${Client.client.intlGet(this.guildId, 'commandSyntaxDespawn')}`;
+        const commandDespawnEn = `${prefix}${Client.client.intlGet('en', 'commandSyntaxDespawn')}`;
+
+        if (command.toLowerCase().startsWith(`${commandDespawn} `)) {
+            command = command.slice(`${commandDespawn} `.length).trim();
+        }
+        else {
+            command = command.slice(`${commandDespawnEn} `.length).trim();
+        }
+
+        const itemId = Client.client.items.getClosestItemIdByName(command);
+        if (itemId === undefined) {
+            return Client.client.intlGet(this.guildId, 'noItemWithNameFound', {
+                name: command
+            });
+        }
+
+        const itemName = Client.client.items.getName(itemId);
+        const despawnDetails = Client.client.rustlabs.getDespawnDetailsById(itemId);
+        if (despawnDetails === null) {
+            return Client.client.intlGet(this.guildId, 'couldNotFindDespawnDetails', {
+                name: itemName
+            });
+        }
+
+        const despawnTime = despawnDetails[2].timeString;
+
+        return Client.client.intlGet(this.guildId, 'despawnTimeOfItem', {
+            item: itemName,
+            time: despawnTime
+        });
+    }
+
     getCommandEvents(command) {
         const prefix = this.generalSettings.prefix;
         const commandEvents = `${prefix}${Client.client.intlGet(this.guildId, 'commandSyntaxEvents')}`;
@@ -1898,7 +1941,9 @@ class RustPlus extends RustPlusLib {
             return null;
         }
 
-        const messageMaxLength = Constants.MAX_LENGTH_TEAM_MESSAGE - this.trademarkString.length;
+        const trademark = this.generalSettings.trademark;
+        const trademarkString = (trademark === 'NOT SHOWING') ? '' : `${trademark} | `;
+        const messageMaxLength = Constants.MAX_LENGTH_TEAM_MESSAGE - trademarkString.length;
         const leftLength = `...xxx ${Client.client.intlGet(this.guildId, 'more')}.`.length;
 
         let string = '';
@@ -2229,6 +2274,41 @@ class RustPlus extends RustPlusLib {
         }
 
         return strings;
+    }
+
+    getCommandStack(command) {
+        const prefix = this.generalSettings.prefix;
+        const commandStack = `${prefix}${Client.client.intlGet(this.guildId, 'commandSyntaxStack')}`;
+        const commandStackEn = `${prefix}${Client.client.intlGet('en', 'commandSyntaxStack')}`;
+
+        if (command.toLowerCase().startsWith(`${commandStack} `)) {
+            command = command.slice(`${commandStack} `.length).trim();
+        }
+        else {
+            command = command.slice(`${commandStackEn} `.length).trim();
+        }
+
+        const itemId = Client.client.items.getClosestItemIdByName(command);
+        if (itemId === undefined) {
+            return Client.client.intlGet(this.guildId, 'noItemWithNameFound', {
+                name: command
+            });
+        }
+
+        const itemName = Client.client.items.getName(itemId);
+        const stackDetails = Client.client.rustlabs.getStackDetailsById(itemId);
+        if (stackDetails === null) {
+            return Client.client.intlGet(this.guildId, 'couldNotFindStackDetails', {
+                name: itemName
+            });
+        }
+
+        const quantity = stackDetails[2].quantity;
+
+        return Client.client.intlGet(this.guildId, 'stackSizeOfItem', {
+            item: itemName,
+            quantity: quantity
+        });
     }
 
     getCommandSteamId(command, callerSteamId, callerName) {

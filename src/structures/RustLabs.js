@@ -18,9 +18,9 @@
 
 */
 
-const Fuse = require('fuse.js')
-
 const Items = require('./Items');
+const RustlabsBuildingBlocks = require('../staticFiles/rustlabsBuildingBlocks.json');
+const RustlabsOther = require('../staticFiles/rustlabsOther.json');
 
 const CraftData = require('../staticFiles/rustlabsCraftData.json');
 const ResearchData = require('../staticFiles/rustlabsResearchData.json');
@@ -29,6 +29,9 @@ const DurabilityData = require('../staticFiles/rustlabsDurabilityData.json');
 const SmeltingData = require('../staticFiles/rustlabsSmeltingData.json');
 const DespawnData = require('../staticFiles/rustlabsDespawnData.json');
 const StackData = require('../staticFiles/rustlabsStackData.json');
+const DecayData = require('../staticFiles/rustlabsDecayData.json');
+const UpkeepData = require('../staticFiles/rustlabsUpkeepData.json');
+const Utils = require('../util/utils.js');
 
 const IGNORED_RECYCLE_ITEMS = [
     '-946369541' /* Low Grade Fuel */
@@ -49,8 +52,13 @@ class RustLabs {
         this._smeltingData = SmeltingData;
         this._despawnData = DespawnData;
         this._stackData = StackData;
+        this._decayData = DecayData;
+        this._upkeepData = UpkeepData;
 
         this._items = new Items();
+
+        this._rustlabsBuildingBlocks = RustlabsBuildingBlocks;
+        this._rustlabsOther = RustlabsOther;
 
         this._durabilityGroups = [
             'explosive',
@@ -78,11 +86,8 @@ class RustLabs {
             'sulfurLowFirst'
         ];
 
-        const flattenedBuildingBlocks = Object.keys(this.durabilityData['buildingBlocks']).map(e => ({ ['name']: e }));
-        this._fuseBuildingBlocks = new Fuse(flattenedBuildingBlocks, { keys: [{ name: 'name', weight: 0.7 }] });
-
-        const flattenedOther = Object.keys(this.durabilityData['other']).map(e => ({ ['name']: e }));
-        this._fuseOther = new Fuse(flattenedOther, { keys: [{ name: 'name', weight: 0.7 }] });
+        this._buildingBlocks = Object.keys(this.rustlabsBuildingBlocks);
+        this._other = Object.keys(this.rustlabsOther);
     }
 
 
@@ -97,12 +102,16 @@ class RustLabs {
     get smeltingData() { return this._smeltingData; }
     get despawnData() { return this._despawnData; }
     get stackData() { return this._stackData; }
+    get decayData() { return this._decayData; }
+    get upkeepData() { return this._upkeepData; }
     get items() { return this._items; }
+    get rustlabsBuildingBlocks() { return this._rustlabsBuildingBlocks; }
+    get rustlabsOther() { return this._rustlabsOther; }
     get durabilityGroups() { return this._durabilityGroups }
     get durabilityWhich() { return this._durabilityWhich; }
     get orderedBy() { return this._orderedBy; }
-    get fuseBuildingBlocks() { return this._fuseBuildingBlocks; }
-    get fuseOther() { return this._fuseOther; }
+    get buildingBlocks() { return this._buildingBlocks; }
+    get other() { return this._other; }
 
 
     /***********************************************************************************
@@ -136,27 +145,27 @@ class RustLabs {
     /**
      *  Get the closest building block name by name.
      *  @param {string} name The name of the building block.
-     *  @return {string|undefined} undefined if the building block couldnt be found, otherwise the closest name.
+     *  @return {string|null} null if the building block couldnt be found, otherwise the closest name.
      */
     getClosestBuildingBlockNameByName(name) {
-        const result = this.fuseBuildingBlocks.search(name);
-        if (result.length !== 0) {
-            return result[0].item.name;
+        const closestString = Utils.findClosestString(name, this.buildingBlocks);
+        if (closestString !== null) {
+            return closestString;
         }
-        return undefined;
+        return null;
     }
 
     /**
      *  Get the closest other name by name.
      *  @param {string} name The name of the other.
-     *  @return {string|undefined} undefined if the other couldnt be found, otherwise the closest name.
+     *  @return {string|null} null if the other couldnt be found, otherwise the closest name.
      */
     getClosestOtherNameByName(name) {
-        const result = this.fuseOther.search(name);
-        if (result.length !== 0) {
-            return result[0].item.name;
+        const closestString = Utils.findClosestString(name, this.other);
+        if (closestString !== null) {
+            return closestString;
         }
-        return undefined;
+        return null;
     }
 
     /**
@@ -425,6 +434,7 @@ class RustLabs {
      *  @param {string} name The name of the item, building block or other.
      *  @param {string} group The group of the item, building block or other.
      *  @param {string} which The which of the item, building block or other.
+     *  @param {string} orderedBy The orderBy.
      *  @return {array|null} null if something went wrong, otherwise
      *      [type, id/name, itemDetails/name, durabilityDetails]
      */
@@ -439,18 +449,37 @@ class RustLabs {
         let foundName = null;
         if (!foundName) {
             foundName = this.getClosestOtherNameByName(name);
-            if (foundName) type = 'other';
+            if (foundName) {
+                if (this.durabilityData['other'].hasOwnProperty(foundName)) {
+                    type = 'other';
+                }
+                else {
+                    foundName = null;
+                }
+            }
         }
 
         if (!foundName) {
             foundName = this.getClosestBuildingBlockNameByName(name);
-            if (foundName) type = 'buildingBlocks';
+            if (foundName) {
+                if (this.durabilityData['buildingBlocks'].hasOwnProperty(foundName)) {
+                    type = 'buildingBlocks';
+                }
+                else {
+                    foundName = null;
+                }
+            }
         }
 
         if (!foundName) {
             foundName = this.items.getClosestItemIdByName(name);
             if (foundName) {
-                return this.getDurabilityDetailsById(foundName, group, which);
+                if (this.durabilityData['items'].hasOwnProperty(foundName)) {
+                    return this.getDurabilityDetailsById(foundName, group, which, orderedBy);
+                }
+                else {
+                    foundName = null;
+                }
             }
         }
 
@@ -466,7 +495,6 @@ class RustLabs {
         content = this.getArrayOrderedByChoice(content, orderedBy);
 
         return [type, foundName, foundName, content];
-
     }
 
     /**
@@ -625,6 +653,168 @@ class RustLabs {
     getStackDetailsById(id) {
         if (!this.hasStackDetails(id)) return null;
         return [id, this.items.items[id], this.stackData[id]];
+    }
+
+
+    /***********************************************************************************
+     *  Decay functions
+     **********************************************************************************/
+
+    /**
+     *  Check to see if itemId or name is part of decay details data.
+     *  @param {string} itemIdOrName The itemId or name of the entity.
+     *  @return {boolean} true if exist, otherwise false.
+     */
+    hasDecayDetails(itemIdOrName) {
+        return this.decayData['items'].hasOwnProperty(itemIdOrName) ||
+            this.decayData['buildingBlocks'].hasOwnProperty(itemIdOrName) ||
+            this.decayData['other'].hasOwnProperty(itemIdOrName);
+    }
+
+    /**
+     *  Get decay details of an item, building block or other.
+     *  @param {string} name The name of the item, building block or other.
+     *  @return {array|null} null if something went wrong, otherwise
+     *      [type, id/name, itemDetails/name, decayDetails]
+     */
+    getDecayDetailsByName(name) {
+        if (typeof (name) !== 'string') return null;
+
+        let type = null;
+
+        let foundName = null;
+        if (!foundName) {
+            foundName = this.getClosestOtherNameByName(name);
+            if (foundName) {
+                if (this.decayData['other'].hasOwnProperty(foundName)) {
+                    type = 'other';
+                }
+                else {
+                    foundName = null;
+                }
+            }
+        }
+
+        if (!foundName) {
+            foundName = this.getClosestBuildingBlockNameByName(name);
+            if (foundName) {
+                if (this.decayData['buildingBlocks'].hasOwnProperty(foundName)) {
+                    type = 'buildingBlocks';
+                }
+                else {
+                    foundName = null;
+                }
+            }
+        }
+
+        if (!foundName) {
+            foundName = this.items.getClosestItemIdByName(name);
+            if (foundName) {
+                if (this.decayData['items'].hasOwnProperty(foundName)) {
+                    return this.getDecayDetailsById(foundName);
+                }
+                else {
+                    foundName = null;
+                }
+            }
+        }
+
+        if (!foundName) return null;
+
+        return [type, foundName, foundName, this.decayData[type][foundName]];
+    }
+
+    /**
+     *  Get decay details of an item.
+     *  @param {string} id The id of the item.
+     *  @return {array|null} null if something went wrong, otherwise [type, id, itemDetails, decayDetails]
+     */
+    getDecayDetailsById(id) {
+        if (typeof (id) !== 'string') return null;
+        if (!this.hasDecayDetails(id)) return null;
+
+        return ['items', id, this.items.items[id], this.decayData['items'][id]];
+    }
+
+
+    /***********************************************************************************
+     *  Upkeep functions
+     **********************************************************************************/
+
+    /**
+     *  Check to see if itemId or name is part of upkeep details data.
+     *  @param {string} itemIdOrName The itemId or name of the entity.
+     *  @return {boolean} true if exist, otherwise false.
+     */
+    hasUpkeepDetails(itemIdOrName) {
+        return this.upkeepData['items'].hasOwnProperty(itemIdOrName) ||
+            this.upkeepData['buildingBlocks'].hasOwnProperty(itemIdOrName) ||
+            this.upkeepData['other'].hasOwnProperty(itemIdOrName);
+    }
+
+    /**
+     *  Get upkeep details of an item, building block or other.
+     *  @param {string} name The name of the item, building block or other.
+     *  @return {array|null} null if something went wrong, otherwise
+     *      [type, id/name, itemDetails/name, upkeepDetails]
+     */
+    getUpkeepDetailsByName(name) {
+        if (typeof (name) !== 'string') return null;
+
+        let type = null;
+
+        let foundName = null;
+        if (!foundName) {
+            foundName = this.getClosestOtherNameByName(name);
+            if (foundName) {
+                if (this.upkeepData['other'].hasOwnProperty(foundName)) {
+                    type = 'other';
+                }
+                else {
+                    foundName = null;
+                }
+            }
+        }
+
+        if (!foundName) {
+            foundName = this.getClosestBuildingBlockNameByName(name);
+            if (foundName) {
+                if (this.upkeepData['buildingBlocks'].hasOwnProperty(foundName)) {
+                    type = 'buildingBlocks';
+                }
+                else {
+                    foundName = null;
+                }
+            }
+        }
+
+        if (!foundName) {
+            foundName = this.items.getClosestItemIdByName(name);
+            if (foundName) {
+                if (this.upkeepData['items'].hasOwnProperty(foundName)) {
+                    return this.getUpkeepDetailsById(foundName);
+                }
+                else {
+                    foundName = null;
+                }
+            }
+        }
+
+        if (!foundName) return null;
+
+        return [type, foundName, foundName, this.upkeepData[type][foundName]];
+    }
+
+    /**
+     *  Get upkeep details of an item.
+     *  @param {string} id The id of the item.
+     *  @return {array|null} null if something went wrong, otherwise [type, id, itemDetails, upkeepDetails]
+     */
+    getUpkeepDetailsById(id) {
+        if (typeof (id) !== 'string') return null;
+        if (!this.hasUpkeepDetails(id)) return null;
+
+        return ['items', id, this.items.items[id], this.upkeepData['items'][id]];
     }
 }
 
